@@ -1,0 +1,21 @@
+.but-wrap {
+    margin-top: 20px;
+}
+
+.but-actions {
+    margin: 20px 0;
+}
+
+.but-actions .button {
+    margin-right: 10px;
+}
+
+table.widefat td {
+    vertical-align: middle;
+}
+#but-actions {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 10px;
+    align-items: center;
+}   
