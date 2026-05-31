@@ -7,6 +7,7 @@ if (!defined('ABSPATH')) {
 class BUT_Scanner {
 
     public static function scan_all_posts() {
+
         global $wpdb;
 
         $table = BUT_Database::table_name();
@@ -14,9 +15,9 @@ class BUT_Scanner {
         $wpdb->query("TRUNCATE TABLE {$table}");
 
         $posts = get_posts([
-            'post_type' => get_post_types(['public' => true]),
-            'post_status' => ['publish', 'draft', 'future', 'private'],
-            'numberposts' => -1,
+            'post_type'      => 'page',
+            'post_status'    => ['publish', 'draft', 'private'],
+            'posts_per_page' => -1,
         ]);
 
         foreach ($posts as $post) {
@@ -25,47 +26,164 @@ class BUT_Scanner {
     }
 
     public static function scan_post($post) {
+
+        if (!$post) {
+            return;
+        }
+
         global $wpdb;
 
         $table = BUT_Database::table_name();
 
-        if (!has_blocks($post->post_content)) {
+        $blocks = parse_blocks($post->post_content);
+
+        if (empty($blocks)) {
             return;
         }
 
-        $blocks = parse_blocks($post->post_content);
-        $block_names = [];
+        /*
+         * Scan Lazy Blocks
+         */
+        $block_counts = [];
 
-        self::extract_blocks($blocks, $block_names);
+        self::extract_lazy_blocks(
+            $blocks,
+            $block_counts
+        );
 
-        $block_names = array_unique($block_names);
+        foreach ($block_counts as $block_name => $count) {
 
-        foreach ($block_names as $block_name) {
             $wpdb->insert(
                 $table,
                 [
-                    'block_name' => sanitize_text_field($block_name),
-                    'post_id' => $post->ID,
-                    'post_title' => sanitize_text_field($post->post_title),
-                    'post_type' => sanitize_text_field($post->post_type),
-                    'post_status' => sanitize_text_field($post->post_status),
-                    'updated_at' => current_time('mysql'),
-                ],
-                ['%s', '%d', '%s', '%s', '%s', '%s']
+                    'block_name'  => $block_name,
+                    'block_count' => $count,
+                    'post_id'     => $post->ID,
+                    'post_title'  => $post->post_title,
+                    'post_type'   => 'page',
+                    'post_status' => $post->post_status,
+                    'updated_at'  => current_time('mysql'),
+                ]
+            );
+        }
+
+        /*
+         * Scan Media inside Lazy Blocks
+         */
+        $media_counts = [];
+
+        self::extract_media(
+            $blocks,
+            $media_counts
+        );
+
+        foreach ($media_counts as $attachment_id => $count) {
+
+            $file = get_attached_file($attachment_id);
+
+            if (!$file) {
+                continue;
+            }
+
+            $wpdb->insert(
+                $table,
+                [
+                    'block_name'  => basename($file),
+                    'block_count' => $count,
+                    'post_id'     => $post->ID,
+                    'post_title'  => $post->post_title,
+                    'post_type'   => 'attachment',
+                    'post_status' => $post->post_status,
+                    'updated_at'  => current_time('mysql'),
+                ]
             );
         }
     }
 
-    private static function extract_blocks($blocks, &$block_names) {
+    private static function extract_lazy_blocks($blocks, &$counts = []) {
+
         foreach ($blocks as $block) {
+
             if (!empty($block['blockName'])) {
-                $block_names[] = $block['blockName'];
+
+                if (
+                    strpos(
+                        $block['blockName'],
+                        'lazyblock/'
+                    ) === 0
+                ) {
+
+                    $name = $block['blockName'];
+
+                    if (!isset($counts[$name])) {
+                        $counts[$name] = 0;
+                    }
+
+                    $counts[$name]++;
+                }
             }
 
             if (!empty($block['innerBlocks'])) {
-                self::extract_blocks($block['innerBlocks'], $block_names);
+
+                self::extract_lazy_blocks(
+                    $block['innerBlocks'],
+                    $counts
+                );
+            }
+        }
+    }
+
+    private static function extract_media($blocks, &$media_counts = []) {
+
+        foreach ($blocks as $block) {
+
+            if (!empty($block['attrs'])) {
+
+                foreach ($block['attrs'] as $value) {
+
+                    /*
+                     * LazyBlocks image field stores encoded JSON
+                     */
+                    if (is_string($value)) {
+
+                        $decoded = json_decode(
+                            urldecode($value),
+                            true
+                        );
+
+                        if (
+                            is_array($decoded) &&
+                            !empty($decoded['id'])
+                        ) {
+
+                            $attachment_id = intval(
+                                $decoded['id']
+                            );
+
+                            if (
+                                get_post_type(
+                                    $attachment_id
+                                ) === 'attachment'
+                            ) {
+
+                                if (!isset($media_counts[$attachment_id])) {
+                                    $media_counts[$attachment_id] = 0;
+                                }
+
+                                $media_counts[$attachment_id]++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!empty($block['innerBlocks'])) {
+
+                self::extract_media(
+                    $block['innerBlocks'],
+                    $media_counts
+                );
             }
         }
     }
 }
-?>

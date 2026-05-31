@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: Block Usage Tracker
+ * Plugin Name: Block & Media Usage
  * Plugin URI: #
  * Description: Track Gutenberg block usage across WordPress posts and pages.
  * Version: 1.0.0
